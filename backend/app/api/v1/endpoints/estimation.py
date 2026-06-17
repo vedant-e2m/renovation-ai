@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas.session import EstimateResponse, Component
 from app.services.session_store import session_store
+from app.services.component_geometry import normalize_components_coordinates
 from app.services.estimation import calculate_scale_factor, calculate_quantities
 
 router = APIRouter()
@@ -13,17 +14,23 @@ async def get_estimate(session_id: str):
 
     components_data = session_data.get("components", [])
     materials = session_data.get("materials", {})
+    image_width = session_data.get("image_width", 1000)
+    image_height = session_data.get("image_height", 1000)
     
     if not components_data:
         raise HTTPException(status_code=400, detail="No components detected")
+
+    components_data = normalize_components_coordinates(
+        components_data, image_width, image_height
+    )
 
     components = [Component(**comp) for comp in components_data]
     
     # Calculate scale factor
     scale_factor = calculate_scale_factor(
         components=components,
-        image_width=session_data.get("image_width", 1000),
-        image_height=session_data.get("image_height", 1000)
+        image_width=image_width,
+        image_height=image_height
     )
 
     # Calculate quantities and costs

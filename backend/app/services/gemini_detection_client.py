@@ -8,6 +8,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.schemas.session import Component, ComponentType
+from app.services.component_geometry import scale_points_to_image_space
 from app.services.mask_compositor import mask_to_base64_png
 
 logger = logging.getLogger(__name__)
@@ -383,23 +384,7 @@ Rules:
         if not points:
             return []
 
-        max_x = max(p[0] for p in points)
-        max_y = max(p[1] for p in points)
-
-        if max_x > image_width * 1.05 or max_y > image_height * 1.05:
-            if max_x <= 1000 and max_y <= 1000:
-                points = [
-                    [
-                        (p[0] / 1000.0) * image_width,
-                        (p[1] / 1000.0) * image_height,
-                    ]
-                    for p in points
-                ]
-            else:
-                scale_x = image_width / max_x if max_x else 1.0
-                scale_y = image_height / max_y if max_y else 1.0
-                scale = min(scale_x, scale_y)
-                points = [[p[0] * scale, p[1] * scale] for p in points]
+        points = scale_points_to_image_space(points, image_width, image_height)
 
         clipped: List[List[float]] = []
         for px, py in points:

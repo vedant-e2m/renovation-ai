@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Component } from '../services/api';
-import { polygonArea, polygonBbox } from '../utils/componentGeometry';
+import {
+  normalizeComponentCoordinates,
+  polygonArea,
+  polygonBbox,
+} from '../utils/componentGeometry';
 
 // Visually distinct colours — stroke, fill-alpha used separately
 export const COMPONENT_PALETTE = [
@@ -43,7 +47,12 @@ interface PolygonEditorCanvasProps {
   selectedComponentId?: string | null;
   onSelectComponent?: (id: string | null) => void;
   onComponentsChange?: (components: Component[]) => void;
+  /** Cap displayed height so tall photos don't dominate the page. */
+  maxHeight?: string;
+  className?: string;
 }
+
+const DEFAULT_MAX_HEIGHT = 'min(420px, 50vh)';
 
 interface NodeDragState {
   componentId: string;
@@ -58,6 +67,8 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
   selectedComponentId = null,
   onSelectComponent,
   onComponentsChange,
+  maxHeight = DEFAULT_MAX_HEIGHT,
+  className = '',
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(components);
@@ -69,12 +80,17 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
   const refWidth = imageWidth || naturalSize.width;
   const refHeight = imageHeight || naturalSize.height;
 
+  const displaySourceComponents = useMemo(
+    () => normalizeComponentCoordinates(components, refWidth, refHeight),
+    [components, refWidth, refHeight],
+  );
+
   useEffect(() => {
     if (!nodeDrag) {
-      setLiveComponents(components);
-      liveRef.current = components;
+      setLiveComponents(displaySourceComponents);
+      liveRef.current = displaySourceComponents;
     }
-  }, [components, nodeDrag]);
+  }, [displaySourceComponents, nodeDrag]);
 
   const toImageCoords = useCallback(
     (clientX: number, clientY: number) => {
@@ -163,13 +179,13 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
   // Stable colour assignment — keyed by component id so colours don't shift on re-renders
   const colorMap = useMemo(() => {
     const map: Record<string, string> = {};
-    components.forEach((c, i) => {
+    displaySourceComponents.forEach((c, i) => {
       map[c.id] = COMPONENT_PALETTE[i % COMPONENT_PALETTE.length];
     });
     return map;
-  }, [components]);
+  }, [displaySourceComponents]);
 
-  const displayComponents = nodeDrag ? liveComponents : components;
+  const displayComponents = nodeDrag ? liveComponents : displaySourceComponents;
   const selectedComp = displayComponents.find((c) => c.id === selectedComponentId);
 
   // Compute zoom transform for the selected component's bounding box.
@@ -180,7 +196,7 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
     if (!selectedComponentId || !refWidth || !refHeight) {
       return { ...base, transform: 'scale(1)', transformOrigin: '50% 50%' };
     }
-    const comp = components.find((c) => c.id === selectedComponentId);
+    const comp = displaySourceComponents.find((c) => c.id === selectedComponentId);
     if (!comp || comp.polygon.length === 0) {
       return { ...base, transform: 'scale(1)', transformOrigin: '50% 50%' };
     }
@@ -195,52 +211,66 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
     const cx = (minX + maxX) / 2 / refWidth;
     const cy = (minY + maxY) / 2 / refHeight;
 
-    // Bbox size with 40% padding on each side, clamped to full image
-    const PADDING = 1.5;
+    // Only zoom into small regions — large selections (e.g. full roof) stay at 1x
+    const PADDING = 1.4;
     const bw = Math.min(1, ((maxX - minX) / refWidth) * PADDING);
     const bh = Math.min(1, ((maxY - minY) / refHeight) * PADDING);
-    const scale = Math.min(Math.max(1.2, Math.min(1 / bw, 1 / bh)), 4);
+    if (bw > 0.45 || bh > 0.45) {
+      return { ...base, transform: 'scale(1)', transformOrigin: '50% 50%' };
+    }
+    const scale = Math.min(Math.min(1 / bw, 1 / bh), 2.5);
+    if (scale <= 1.05) {
+      return { ...base, transform: 'scale(1)', transformOrigin: '50% 50%' };
+    }
 
     return {
       ...base,
       transform: `scale(${scale})`,
       transformOrigin: `${cx * 100}% ${cy * 100}%`,
     };
-  }, [selectedComponentId, components, refWidth, refHeight]);
+  }, [selectedComponentId, displaySourceComponents, refWidth, refHeight]);
 
   return (
-    <div className="relative border border-border rounded-xl overflow-hidden bg-surface-muted">
+    <div
+      className={`relative border border-border rounded-xl overflow-hidden bg-surface-muted mx-auto max-w-lg ${className}`}
+    >
       {!loaded && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface-muted z-10 min-h-[240px]">
+        <div className="absolute inset-0 flex items-center justify-center bg-surface-muted z-10 min-h-[200px]">
           <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-      <div
-        className={`relative w-full transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-        style={zoomStyle}
-      >
-        <img
-          src={imageUrl}
-          alt="House exterior"
-          className="block w-full h-auto select-none"
-          draggable={false}
-          onLoad={(e) => {
-            const img = e.currentTarget;
-            setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
-            setLoaded(true);
-          }}
-          onError={() => setLoaded(true)}
-        />
-
-        {refWidth > 0 && refHeight > 0 && (
+      <div className="flex justify-center">
+        <div
+          className="relative overflow-hidden"
+          style={{ maxHeight, maxWidth: '100%' }}
+        >
           <div
-            ref={overlayRef}
-            className="absolute inset-0 cursor-default"
+            className={`relative transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+            style={zoomStyle}
           >
-            <svg
-              className="absolute inset-0 w-full h-full"
-              viewBox={`0 0 ${refWidth} ${refHeight}`}
-              preserveAspectRatio="none"
+            <img
+              src={imageUrl}
+              alt="House exterior"
+              className="block max-w-full w-auto h-auto select-none"
+              style={{ maxHeight }}
+              draggable={false}
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                setLoaded(true);
+              }}
+              onError={() => setLoaded(true)}
+            />
+
+            {refWidth > 0 && refHeight > 0 && (
+              <div
+                ref={overlayRef}
+                className="absolute inset-0 cursor-default"
+              >
+                <svg
+                  className="absolute inset-0 w-full h-full"
+                  viewBox={`0 0 ${refWidth} ${refHeight}`}
+                  preserveAspectRatio="xMidYMid meet"
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget) onSelectComponent?.(null);
               }}
@@ -325,31 +355,33 @@ export const PolygonEditorCanvas: React.FC<PolygonEditorCanvasProps> = ({
                   </g>
                 );
               })()}
-            </svg>
+                </svg>
 
-            {/* Labels — only show all when nothing is selected; when selected show only the active one */}
-            {displayComponents
-              .filter((comp) => !selectedComponentId || comp.id === selectedComponentId)
-              .map((comp) => {
-                const [x, y] = comp.polygon[0] ?? comp.bbox;
-                const color = colorMap[comp.id] ?? COMPONENT_PALETTE[0];
-                return (
-                  <span
-                    key={`${comp.id}-label`}
-                    className="absolute whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-white pointer-events-none"
-                    style={{
-                      left: `${(x / refWidth) * 100}%`,
-                      top: `${(y / refHeight) * 100}%`,
-                      transform: 'translateY(-120%)',
-                      backgroundColor: color,
-                    }}
-                  >
-                    {comp.label}
-                  </span>
-                );
-              })}
+                {/* Labels — only show all when nothing is selected; when selected show only the active one */}
+                {displayComponents
+                  .filter((comp) => !selectedComponentId || comp.id === selectedComponentId)
+                  .map((comp) => {
+                    const [x, y] = comp.polygon[0] ?? comp.bbox;
+                    const color = colorMap[comp.id] ?? COMPONENT_PALETTE[0];
+                    return (
+                      <span
+                        key={`${comp.id}-label`}
+                        className="absolute whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-white pointer-events-none"
+                        style={{
+                          left: `${(x / refWidth) * 100}%`,
+                          top: `${(y / refHeight) * 100}%`,
+                          transform: 'translateY(-120%)',
+                          backgroundColor: color,
+                        }}
+                      >
+                        {comp.label}
+                      </span>
+                    );
+                  })}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas.session import VisualizeRequest, VisualizeResponse
 from app.services.session_store import session_store
+from app.services.component_geometry import normalize_components_coordinates
 from app.services.mask_compositor import composite_all_materials
 from app.services.openrouter_client import openrouter_client
 
@@ -22,6 +23,9 @@ async def generate_visualization(session_id: str, request: VisualizeRequest):
         raise HTTPException(status_code=400, detail="No materials selected")
 
     components = session_data.get("components", [])
+    image_width = session_data.get("image_width", 0)
+    image_height = session_data.get("image_height", 0)
+    components = normalize_components_coordinates(components, image_width, image_height)
     component_ids = request.component_ids or list(materials.keys())
 
     try:

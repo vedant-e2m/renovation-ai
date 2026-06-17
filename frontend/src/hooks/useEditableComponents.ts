@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Component, Session } from '../services/api';
 import { api } from '../services/api';
+import { normalizeComponentCoordinates } from '../utils/componentGeometry';
 import { useSessionStore } from '../store/useSessionStore';
 
 export function useEditableComponents(session: Session | null) {
@@ -21,10 +22,14 @@ export function useEditableComponents(session: Session | null) {
       return;
     }
 
-    setComponents(session.components ?? []);
-    componentsRef.current = session.components ?? [];
+    const width = session.image_width ?? 0;
+    const height = session.image_height ?? 0;
+    const normalized = normalizeComponentCoordinates(session.components ?? [], width, height);
+
+    setComponents(normalized);
+    componentsRef.current = normalized;
     setDirty(false);
-  }, [session?.session_id, session?.components]);
+  }, [session?.session_id, session?.components, session?.image_width, session?.image_height]);
 
   const handleComponentsChange = useCallback((updated: Component[]) => {
     setComponents(updated);

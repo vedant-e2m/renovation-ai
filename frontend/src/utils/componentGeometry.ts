@@ -12,6 +12,62 @@ export function polygonArea(polygon: number[][]): number {
   return Math.abs(sum) / 2;
 }
 
+function detectCoordinateScale(
+  components: Component[],
+  imageWidth: number,
+  imageHeight: number,
+): { scaleX: number; scaleY: number } | null {
+  let maxX = 0;
+  let maxY = 0;
+  for (const comp of components) {
+    for (const [x, y] of comp.polygon) {
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (maxX === 0 && maxY === 0) return null;
+
+  if (maxX <= 1 && maxY <= 1) {
+    return { scaleX: imageWidth, scaleY: imageHeight };
+  }
+
+  if (
+    maxX <= 1000 &&
+    maxY <= 1000 &&
+    (imageWidth > 1000 || imageHeight > 1000) &&
+    (maxX < imageWidth * 0.5 || maxY < imageHeight * 0.5)
+  ) {
+    return { scaleX: imageWidth / 1000, scaleY: imageHeight / 1000 };
+  }
+
+  return null;
+}
+
+/** Scale polygon coords when the model returned 0-1 or 0-1000 values instead of pixels. */
+export function normalizeComponentCoordinates(
+  components: Component[],
+  imageWidth: number,
+  imageHeight: number,
+): Component[] {
+  if (!components.length || !imageWidth || !imageHeight) return components;
+
+  const scale = detectCoordinateScale(components, imageWidth, imageHeight);
+  if (!scale) return components;
+
+  return components.map((comp) => {
+    const polygon = comp.polygon.map(([x, y]) => [
+      x * scale.scaleX,
+      y * scale.scaleY,
+    ]);
+    return {
+      ...comp,
+      polygon,
+      bbox: polygonBbox(polygon),
+      area_pixels: polygonArea(polygon),
+    };
+  });
+}
+
 export function polygonBbox(polygon: number[][]): number[] {
   if (polygon.length === 0) return [0, 0, 0, 0];
   let minX = Infinity;
