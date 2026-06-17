@@ -1,0 +1,12 @@
+# Secrets
+.env
+backend/.env
+!.env.example
+
+# Python
+backend/venv/
+__pycache__/
+
+# Frontend (frontend/.gitignore also covers these)
+frontend/node_modules/
+frontend/dist/
